@@ -1,0 +1,110 @@
+using System.Collections.Generic;
+using System.IO.Ports; //Api Compatibility Level = (.Net Framework, NET_Unity_4_8)
+using System.Threading.Tasks;
+using UnityEngine;
+using UnityEngine.Events;
+
+public class ArduinoInput : MonoBehaviour
+{
+    [HideInInspector] public string inputValue { get; private set; }
+    public UnityEvent<string> arduinoInputEvent;
+
+    private SerialPort _serialPort;
+    private readonly Queue<string> _serialPorts = new Queue<string>();
+
+
+    private static ArduinoInput instance;
+    public static ArduinoInput Instance() => instance;
+    private void Awake() => instance = this;
+    private void Start() => LocateArduino();
+
+    private void Update()
+    {
+        if (_serialPort != null && _serialPort.IsOpen)
+        {
+            GetValue();
+            arduinoInputEvent.Invoke(inputValue);
+        }
+        else
+            inputValue = string.Empty;
+    }
+
+    public void LocateArduino()
+    {
+        _serialPorts.Clear();
+
+        string[] ports = SerialPort.GetPortNames();
+
+        Debug.Log(
+            DebugFormated("searching for arduino device", 
+            $"Available ports: {string.Join(", ", ports)}"));
+
+        foreach (string port in ports)
+            _serialPorts.Enqueue(port);
+
+        ProcessQueue();
+    }
+
+    private async void ProcessQueue()
+    {
+        await Task.Run(() =>
+        {
+            while (_serialPorts.Count > 0)
+            {
+                string port = _serialPorts.Dequeue();
+
+                if (TestPort(port))
+                    ConnectToPort(port);
+            }
+
+            if (_serialPort == null)
+                Debug.LogWarning(
+                    DebugFormated("connection fail", 
+                    "No Arduino found!"));
+        });
+    }
+
+    private bool TestPort(string port)
+    {
+        using (SerialPort testPort = new SerialPort(port, 9600))
+            try
+            {
+                testPort.Open();
+                testPort.ReadTimeout = 500;
+
+                string response = testPort.ReadByte().ToString();
+                testPort.Close();
+
+                return (response != null);
+            }
+            catch { return (false); }
+    }
+
+    private void ConnectToPort(string port)
+    {
+        _serialPort = new SerialPort(port, 9600);
+        _serialPort.DtrEnable = false;
+        _serialPort.ReadTimeout = 10;
+        _serialPort.Open();
+
+        Debug.Log(
+            DebugFormated("connected", 
+            $"Arduino found on port: {port}"));
+    }
+
+    private string DebugFormated(string title, string content) => $"[{title.ToUpper()}]\r\n {content}";
+
+    private void OnApplicationQuit()
+    {
+        if (_serialPort != null && _serialPort.IsOpen)
+            _serialPort.Close();
+    }
+
+    private string GetValue()
+    {
+        try { inputValue = _serialPort.ReadLine(); }
+        catch { }
+
+        return inputValue;
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "name": "hrs.autoarduino.editor",
+    "rootNamespace": "hrs.autoarduino.editor",
+    "references": [
+        "GUID:f682f279949c850449adbe4aa64057e8"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
