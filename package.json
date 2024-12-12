@@ -1,0 +1,16 @@
+{
+  "name": "com.hrs.autoarduino",
+  "version": "1.0.0",
+  "displayName": "Auto Arduino",
+  "description": "Component to connect and read Arduino Devices",
+  "unity": "2019.3",
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "keywords": [
+    "",""
+  ],
+  "dependencies": {
+    
+  }
+}
