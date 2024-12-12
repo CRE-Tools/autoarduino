@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO.Ports; //Api Compatibility Level = (.Net Framework, NET_Unity_4_8)
 using System.Threading.Tasks;
@@ -6,41 +7,129 @@ using UnityEngine.Events;
 
 public class ArduinoInput : MonoBehaviour
 {
-    [HideInInspector] public string inputValue { get; private set; }
-    public UnityEvent<string> arduinoInputEvent;
-
-    private SerialPort _serialPort;
-    private readonly Queue<string> _serialPorts = new Queue<string>();
-
-
+    #region Declarations
     private static ArduinoInput instance;
-    public static ArduinoInput Instance() => instance;
-    private void Awake() => instance = this;
-    private void Start() => LocateArduino();
+    private static readonly Queue<Action> _executionQueue = new Queue<Action>();
+    private readonly Queue<string> _serialPorts = new Queue<string>();
+    private SerialPort _serialPort;
+    private string _inputValue;
+
+    [SerializeField] private bool _searchForDeviceOnStart = true;
+    [SerializeField] private bool _readDevice = true;
+    [SerializeField] private bool _printStatus = false;
+
+    [SerializeField] private UnityEvent<string> onTryConnection;
+    [SerializeField] private UnityEvent<string> onTryConnectionSuccess;
+    [SerializeField] private UnityEvent<string> onTryConnectionFail;
+    [SerializeField] private UnityEvent<string> onConnectionLost;
+    [SerializeField] private UnityEvent<string> onStatusUpdate;
+    [SerializeField] private UnityEvent<string> onInputContent;
+    #endregion
+
+    #region PublicMethods
+    public static void AddListener_TryConnection(UnityAction<string> func) => instance.onTryConnection.AddListener(func);
+    public static void AddListener_TryConnectionSuccess(UnityAction<string> func) => instance.onTryConnectionSuccess.AddListener(func);
+    public static void AddListener_TryConnectionFail(UnityAction<string> func) => instance.onTryConnectionFail.AddListener(func);
+    public static void AddListener_ConnectionLost(UnityAction<string> func) => instance.onConnectionLost.AddListener(func);
+    public static void AddListener_StatusUpdate(UnityAction<string> func) => instance.onStatusUpdate.AddListener(func);
+    public static void AddListener_InputContent(UnityAction<string> func) => instance.onInputContent.AddListener(func);
+
+    public static void LookForDevice() => instance.LocateArduino();
+    public static void CanReadDevice(bool canRead = true) => instance._readDevice = canRead;
+    #endregion
+
+    #region UnityMonoBehaviour
+    private void Awake()
+    {
+        if (instance == null) instance = this;
+        else Destroy(instance);
+    }
+
+    private void Start()
+    {
+        if (_searchForDeviceOnStart) LocateArduino();
+    }
 
     private void Update()
     {
+        DequeueExecutions();
+
+        if (!_readDevice) return;
+
         if (_serialPort != null && _serialPort.IsOpen)
         {
             GetValue();
-            arduinoInputEvent.Invoke(inputValue);
+            onInputContent.Invoke(_inputValue);
+
+            ConnectionVerify();
         }
-        else
-            inputValue = string.Empty;
+        else _inputValue = string.Empty;
     }
 
-    public void LocateArduino()
+    private void OnApplicationQuit()
     {
+        if (_serialPort != null && _serialPort.IsOpen)
+            _serialPort.Close();
+    }
+
+    private void OnDestroy() => instance = null;
+
+    #endregion
+
+    #region UpdateCycle
+    private void DequeueExecutions()
+    {
+        lock (_executionQueue)
+            while (_executionQueue.Count > 0)
+                _executionQueue.Dequeue().Invoke();
+    }
+
+    private void GetValue()
+    {
+        try { _inputValue = _serialPort.ReadLine(); }
+        catch { }
+    }
+
+    private void ConnectionVerify()
+    {
+        try
+        {
+            int tempBytes = _serialPort.BytesToRead;
+        }
+        catch
+        {
+            StatusUpdate(onConnectionLost,
+            "lost connection",
+            "Arduino has been disconnected");
+
+            _serialPort.Close();
+            _serialPort = null;
+            return;
+        }
+    }
+    #endregion
+
+    #region Connection
+    private void LocateArduino()
+    {
+        if (_serialPort != null)
+        {
+            StatusUpdate(onTryConnectionFail,
+            "canceled",
+            "Arduino is already connected");
+
+            return;
+        }
+
         _serialPorts.Clear();
 
         string[] ports = SerialPort.GetPortNames();
 
-        Debug.Log(
-            DebugFormated("searching for arduino device", 
-            $"Available ports: {string.Join(", ", ports)}"));
+        StatusUpdate(onTryConnection,
+            "searching for device",
+            $"Available ports: {string.Join(", ", ports)}");
 
-        foreach (string port in ports)
-            _serialPorts.Enqueue(port);
+        foreach (string port in ports) _serialPorts.Enqueue(port);
 
         ProcessQueue();
     }
@@ -53,14 +142,13 @@ public class ArduinoInput : MonoBehaviour
             {
                 string port = _serialPorts.Dequeue();
 
-                if (TestPort(port))
-                    ConnectToPort(port);
+                if (TestPort(port)) ConnectToPort(port);
             }
 
             if (_serialPort == null)
-                Debug.LogWarning(
-                    DebugFormated("connection fail", 
-                    "No Arduino found!"));
+                StatusUpdate(onTryConnectionFail,
+                    "connection fail",
+                    "No Arduino found!");
         });
     }
 
@@ -87,24 +175,27 @@ public class ArduinoInput : MonoBehaviour
         _serialPort.ReadTimeout = 10;
         _serialPort.Open();
 
-        Debug.Log(
-            DebugFormated("connected", 
-            $"Arduino found on port: {port}"));
+        StatusUpdate(onTryConnectionSuccess,
+            "connected",
+            $"Arduino found on port: {port}");
     }
+    #endregion
 
-    private string DebugFormated(string title, string content) => $"[{title.ToUpper()}]\r\n {content}";
-
-    private void OnApplicationQuit()
+    #region StatusAndActions
+    private string StatusUpdate(UnityEvent<string> _event, string title, string content)
     {
-        if (_serialPort != null && _serialPort.IsOpen)
-            _serialPort.Close();
+        string msg = $"[{title.ToUpper()}]\r\n {content}";
+
+        if (_printStatus)
+            Debug.Log(msg);
+
+        InvokeEvents(onStatusUpdate, msg);
+        InvokeEvents(_event, msg);
+
+        return msg;
     }
 
-    private string GetValue()
-    {
-        try { inputValue = _serialPort.ReadLine(); }
-        catch { }
-
-        return inputValue;
-    }
+    private void InvokeEvents(UnityEvent<string> _event, string msg) =>
+        _executionQueue.Enqueue(() => _event.Invoke(msg));
+    #endregion
 }
